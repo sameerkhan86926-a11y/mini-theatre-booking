@@ -2,11 +2,13 @@
 
 /*
   NOIR MINI THEATRE
-  Frontend demo using HTML, CSS and localStorage.
+  Frontend demo with UPI payment interface.
 
   IMPORTANT:
-  localStorage is browser-specific.
-  This is not a shared database or secure payment system.
+  - localStorage is browser-specific.
+  - UTR submission does not verify payment.
+  - Never confirm a payment without checking your bank/UPI app.
+  - Production requires a shared database and secure backend.
 */
 
 const STORAGE_KEY = "noirMiniTheatre_v1";
@@ -16,8 +18,6 @@ const CONFIG = {
   seatCount: 30,
   ticketPrice: 150,
   currency: "INR",
-
-  // Replace with your actual UPI ID later.
   upiId: "",
 
   movies: [
@@ -55,7 +55,7 @@ const CONFIG = {
   ]
 };
 
-const $ = (selector) => document.querySelector(selector);
+const $ = selector => document.querySelector(selector);
 
 const elements = {
   movieGrid: $("#movieGrid"),
@@ -85,15 +85,11 @@ const elements = {
 
 let selectedSeats = new Set();
 let toastTimer;
+let activePaymentBookingId = null;
 
-const memory = {
-  data: null
-};
+const memory = { data: null };
 
-
-/* ---------------------------------
-   STORAGE
----------------------------------- */
+/* ---------------- STORAGE ---------------- */
 
 function createInitialData() {
   return {
@@ -106,14 +102,9 @@ function createInitialData() {
     },
 
     movies: CONFIG.movies.map(movie => ({ ...movie })),
-
     bookings: [],
-
     privateBookings: [],
-
     blockedSeats: [],
-
-    // Store only demo data in this browser.
     demoInitialized: true
   };
 }
@@ -150,58 +141,46 @@ function loadData() {
       memory.data.blockedSeats = [];
     }
 
-    return memory.data;
+    // Keep settings created by an earlier version compatible.
+    if (!Number.isFinite(Number(memory.data.settings.ticketPrice))) {
+      memory.data.settings.ticketPrice = CONFIG.ticketPrice;
+    }
 
+    if (typeof memory.data.settings.upiId !== "string") {
+      memory.data.settings.upiId = CONFIG.upiId;
+    }
+
+    return memory.data;
   } catch (error) {
     console.error("Unable to load saved data:", error);
-
     memory.data = createInitialData();
 
-    showToast(
-      "Saved data could not be read. Check browser storage."
-    );
-
+    showToast("Saved data could not be read. Check browser storage.");
     return memory.data;
   }
 }
 
 function saveData() {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(memory.data)
-    );
-
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(memory.data));
     return true;
-
   } catch (error) {
     console.error("Unable to save data:", error);
-
-    showToast(
-      "Storage failed. Check browser storage availability."
-    );
-
+    showToast("Storage failed. Check browser storage availability.");
     return false;
   }
 }
 
-
-/* ---------------------------------
-   GENERAL HELPERS
----------------------------------- */
+/* ---------------- HELPERS ---------------- */
 
 function escapeHTML(value) {
-  return String(value ?? "").replace(/[&<>"']/g, char => {
-    const replacements = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#039;"
-    };
-
-    return replacements[char];
-  });
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[char]);
 }
 
 function formatMoney(amount) {
@@ -209,27 +188,18 @@ function formatMoney(amount) {
     style: "currency",
     currency: CONFIG.currency,
     maximumFractionDigits: 0
-  }).format(amount);
+  }).format(Number(amount) || 0);
 }
 
 function generateId(prefix = "BK") {
-  return (
-    prefix +
-    "-" +
-    Date.now().toString(36).toUpperCase() +
-    "-" +
-    Math.random().toString(36).slice(2, 7).toUpperCase()
-  );
+  return prefix + "-" +
+    Date.now().toString(36).toUpperCase() + "-" +
+    Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
 function todayString() {
   const now = new Date();
-
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 function formatDate(dateString) {
@@ -237,9 +207,7 @@ function formatDate(dateString) {
 
   const date = new Date(`${dateString}T12:00:00`);
 
-  if (Number.isNaN(date.getTime())) {
-    return dateString;
-  }
+  if (Number.isNaN(date.getTime())) return dateString;
 
   return new Intl.DateTimeFormat("en-IN", {
     day: "numeric",
@@ -273,19 +241,13 @@ function closeModal(modal) {
 
   modal.hidden = true;
 
-  const anyOpen = document.querySelector(
-    ".modal-overlay:not([hidden])"
-  );
-
-  if (!anyOpen) {
+  if (!document.querySelector(".modal-overlay:not([hidden])")) {
     document.body.style.overflow = "";
   }
 }
 
 function setMinimumDate(input) {
-  if (!input) return;
-
-  input.min = todayString();
+  if (input) input.min = todayString();
 }
 
 function isValidDate(dateString) {
@@ -298,16 +260,11 @@ function isValidPhone(phone) {
 }
 
 function getMovie(movieId) {
-  return memory.data.movies.find(
-    movie => movie.id === movieId
-  );
+  return memory.data.movies.find(movie => movie.id === movieId);
 }
 
 function getShowLabel(time) {
-  const show = CONFIG.showTimes.find(
-    item => item.value === time
-  );
-
+  const show = CONFIG.showTimes.find(item => item.value === time);
   return show ? show.label : time;
 }
 
@@ -316,15 +273,9 @@ function getSelectedShow() {
   const date = elements.showDate.value;
   const time = elements.showTime.value;
 
-  if (!movieId || !date || !time) {
-    return null;
-  }
+  if (!movieId || !date || !time) return null;
 
-  return {
-    movieId,
-    date,
-    time
-  };
+  return { movieId, date, time };
 }
 
 function getBookingPrice() {
@@ -335,56 +286,416 @@ function getBookingPrice() {
     : CONFIG.ticketPrice;
 }
 
+function getReceivingUpiId() {
+  return String(memory.data.settings.upiId || "").trim();
+}
 
-/* ---------------------------------
-   MOVIES
----------------------------------- */
+/* ---------------- PAYMENT UI ---------------- */
+
+function ensurePaymentUI() {
+  if ($("#noirPaymentPanel")) return;
+
+  const style = document.createElement("style");
+
+  style.textContent = `
+    #noirPaymentPanel {
+      margin-top:18px;
+      padding:18px;
+      border:1px solid #38313f;
+      border-radius:14px;
+      background:#100f17;
+      color:#f5f3fa;
+    }
+
+    #noirPaymentPanel h3 {
+      margin:0 0 8px;
+      font-size:21px;
+    }
+
+    #noirPaymentPanel p {
+      color:#b9b4c5;
+      line-height:1.6;
+      font-size:13px;
+    }
+
+    #noirPaymentPanel .payment-amount {
+      font-size:25px;
+      font-weight:800;
+      color:#d7bdff;
+      margin:12px 0;
+    }
+
+    #noirPaymentPanel .payment-actions {
+      display:grid;
+      gap:10px;
+      margin-top:14px;
+    }
+
+    #noirPaymentPanel .payment-action {
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:8px;
+      box-sizing:border-box;
+      width:100%;
+      min-height:45px;
+      padding:12px;
+      border:1px solid #51445f;
+      border-radius:9px;
+      background:#21182c;
+      color:white;
+      font:inherit;
+      font-weight:700;
+      text-decoration:none;
+      cursor:pointer;
+    }
+
+    #noirPaymentPanel .payment-action.primary {
+      background:#c9a5ff;
+      color:#180d25;
+      border-color:#c9a5ff;
+    }
+
+    #noirPaymentPanel .payment-action:disabled {
+      opacity:.5;
+      cursor:not-allowed;
+    }
+
+    #noirPaymentPanel .payment-qr {
+      display:block;
+      width:min(240px,100%);
+      height:auto;
+      margin:15px auto;
+      padding:10px;
+      background:white;
+      border-radius:12px;
+      box-sizing:border-box;
+    }
+
+    #noirPaymentPanel .payment-field {
+      display:block;
+      margin-top:14px;
+    }
+
+    #noirPaymentPanel .payment-field label {
+      display:block;
+      color:#ded8e9;
+      margin-bottom:7px;
+      font-size:13px;
+    }
+
+    #noirPaymentPanel .payment-field input {
+      width:100%;
+      box-sizing:border-box;
+      padding:12px;
+      color:white;
+      background:#08080d;
+      border:1px solid #4a4353;
+      border-radius:8px;
+      font:inherit;
+    }
+
+    #noirPaymentPanel .payment-message {
+      min-height:18px;
+      margin-top:10px;
+      font-size:13px;
+    }
+
+    #noirPaymentPanel .payment-divider {
+      height:1px;
+      background:#393140;
+      margin:18px 0;
+    }
+
+    #noirPaymentPanel .payment-warning {
+      color:#ffd58b;
+      font-size:12px;
+    }
+
+    #noirPaymentPanel .payment-status {
+      display:inline-block;
+      padding:6px 9px;
+      border-radius:7px;
+      background:#2c2435;
+      color:#dfc9ff;
+      font-size:12px;
+    }
+
+    @media(min-width:560px) {
+      #noirPaymentPanel .payment-actions.two {
+        grid-template-columns:1fr 1fr;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+
+  const panel = document.createElement("section");
+
+  panel.id = "noirPaymentPanel";
+  panel.hidden = true;
+  panel.innerHTML = `
+    <h3>Complete your payment</h3>
+    <p>Booking ID: <strong id="paymentBookingId"></strong></p>
+    <div class="payment-amount" id="paymentAmount">₹0</div>
+    <span class="payment-status" id="paymentStatusLabel">Payment pending</span>
+
+    <div id="paymentInstructions">
+      <p>Scan this QR code using a supported UPI app, or tap Pay via UPI.</p>
+      <div id="paymentQrContainer"></div>
+
+      <div class="payment-actions two">
+        <a class="payment-action primary" id="payViaUpi" href="#">
+          Pay via UPI
+        </a>
+        <button class="payment-action" id="copyUpiDetails" type="button">
+          Copy UPI details
+        </button>
+      </div>
+
+      <div class="payment-divider"></div>
+
+      <form id="utrForm">
+        <div class="payment-field">
+          <label for="utrInput">UPI transaction reference / UTR</label>
+          <input
+            id="utrInput"
+            type="text"
+            minlength="6"
+            maxlength="80"
+            autocomplete="off"
+            placeholder="Enter transaction reference"
+            required
+          >
+        </div>
+
+        <button class="payment-action primary" type="submit">
+          Submit payment reference
+        </button>
+        <p id="utrMessage" class="payment-message" aria-live="polite"></p>
+      </form>
+    </div>
+
+    <p class="payment-warning">
+      Important: Submitting a UTR does not verify payment. Your booking remains
+      pending until the theatre verifies the payment. Never pay an ID you have
+      not checked.
+    </p>
+  `;
+
+  elements.bookingModal.querySelector(".modal").appendChild(panel);
+
+  $("#copyUpiDetails").addEventListener("click", copyPaymentDetails);
+  $("#utrForm").addEventListener("submit", submitUtr);
+}
+
+function makeUpiIntent(booking) {
+  const upiId = getReceivingUpiId();
+
+  if (!upiId || !upiId.includes("@")) return "";
+
+  const params = new URLSearchParams({
+    pa: upiId,
+    pn: memory.data.settings.theatreName || CONFIG.theatreName,
+    am: Number(booking.amount).toFixed(2),
+    cu: "INR",
+    tn: `NOIR ${booking.id}`
+  });
+
+  return `upi://pay?${params.toString()}`;
+}
+
+function makeQrUrl(booking) {
+  const intent = makeUpiIntent(booking);
+
+  if (!intent) return "";
+
+  // QR image is generated by a third-party service.
+  // Use only with an UPI ID you control.
+  return "https://api.qrserver.com/v1/create-qr-code/?" +
+    new URLSearchParams({
+      size: "260x260",
+      data: intent
+    }).toString();
+}
+
+function openPaymentPanel(booking) {
+  ensurePaymentUI();
+
+  activePaymentBookingId = booking.id;
+
+  $("#paymentBookingId").textContent = booking.id;
+  $("#paymentAmount").textContent = formatMoney(booking.amount);
+  $("#paymentStatusLabel").textContent =
+    booking.paymentStatus === "verification_pending"
+      ? "Reference submitted · Verification pending"
+      : "Payment pending";
+
+  $("#utrInput").value = booking.utr || "";
+  $("#utrMessage").textContent = "";
+
+  const upiId = getReceivingUpiId();
+  const intent = makeUpiIntent(booking);
+  const qrUrl = makeQrUrl(booking);
+
+  $("#paymentQrContainer").innerHTML = "";
+
+  if (upiId && intent && qrUrl) {
+    const qr = document.createElement("img");
+
+    qr.className = "payment-qr";
+    qr.alt = "UPI payment QR code";
+    qr.src = qrUrl;
+    qr.referrerPolicy = "no-referrer";
+
+    qr.onerror = () => {
+      $("#paymentQrContainer").textContent =
+        "QR image could not load. Use Pay via UPI or copy the details.";
+    };
+
+    $("#paymentQrContainer").appendChild(qr);
+
+    $("#payViaUpi").href = intent;
+    $("#payViaUpi").style.display = "flex";
+
+    $("#copyUpiDetails").disabled = false;
+  } else {
+    $("#paymentQrContainer").innerHTML = `
+      <p>
+        UPI ID is not configured yet. Ask the theatre administrator
+        to set the receiving UPI ID in Admin Settings.
+      </p>
+    `;
+
+    $("#payViaUpi").removeAttribute("href");
+    $("#payViaUpi").style.display = "none";
+    $("#copyUpiDetails").disabled = true;
+  }
+
+  const alreadySubmitted =
+    booking.paymentStatus === "verification_pending" ||
+    booking.paymentStatus === "verified";
+
+  $("#utrForm").hidden = alreadySubmitted;
+
+  if (booking.paymentStatus === "verified") {
+    $("#paymentStatusLabel").textContent = "Payment verified";
+    $("#paymentInstructions").hidden = true;
+  } else {
+    $("#paymentInstructions").hidden = false;
+  }
+
+  panelShow();
+}
+
+function panelShow() {
+  const panel = $("#noirPaymentPanel");
+  if (panel) panel.hidden = false;
+}
+
+async function copyPaymentDetails() {
+  const booking = memory.data.bookings.find(
+    item => item.id === activePaymentBookingId
+  );
+
+  if (!booking) return;
+
+  const details = [
+    `UPI ID: ${getReceivingUpiId()}`,
+    `Amount: ${Number(booking.amount).toFixed(2)} INR`,
+    `Reference: NOIR ${booking.id}`
+  ].join("\n");
+
+  try {
+    await navigator.clipboard.writeText(details);
+    showToast("UPI details copied.");
+  } catch {
+    window.prompt("Copy these payment details:", details);
+  }
+}
+
+function submitUtr(event) {
+  event.preventDefault();
+
+  const utr = $("#utrInput").value.trim();
+
+  if (utr.length < 6 || utr.length > 80) {
+    $("#utrMessage").textContent =
+      "Enter a valid transaction reference.";
+    return;
+  }
+
+  const booking = memory.data.bookings.find(
+    item => item.id === activePaymentBookingId
+  );
+
+  if (!booking) {
+    $("#utrMessage").textContent = "Booking not found.";
+    return;
+  }
+
+  if (booking.status === "cancelled") {
+    $("#utrMessage").textContent =
+      "This booking was cancelled. Contact the theatre.";
+    return;
+  }
+
+  const oldStatus = booking.paymentStatus;
+  const oldUtr = booking.utr;
+  const oldBookingStatus = booking.status;
+
+  booking.utr = utr;
+  booking.paymentMethod = "upi";
+  booking.paymentStatus = "verification_pending";
+  booking.status = "pending";
+  booking.utrSubmittedAt = new Date().toISOString();
+
+  if (!saveData()) {
+    booking.paymentStatus = oldStatus;
+    booking.utr = oldUtr;
+    booking.status = oldBookingStatus;
+    return;
+  }
+
+  $("#paymentStatusLabel").textContent =
+    "Reference submitted · Verification pending";
+
+  $("#utrForm").hidden = true;
+
+  $("#utrMessage").textContent =
+    "Reference saved on this device. Payment is not yet verified.";
+
+  showToast("UTR submitted. Awaiting manual verification.");
+  renderMyBookings();
+}
+
+/* ---------------- MOVIES ---------------- */
 
 function renderMovies() {
-  elements.movieGrid.innerHTML = memory.data.movies
-    .map((movie, index) => {
-      const artwork = [
-        "art-one",
-        "art-two",
-        "art-three"
-      ][index % 3];
+  elements.movieGrid.innerHTML = memory.data.movies.map((movie, index) => {
+    const artwork = ["art-one", "art-two", "art-three"][index % 3];
+    const symbol = ["✦", "♡", "✧"][index % 3];
 
-      const symbol = [
-        "✦",
-        "♡",
-        "✧"
-      ][index % 3];
-
-      return `
-        <article class="movie-card">
-
-          <div class="movie-art ${artwork}">
-            <span class="movie-label">NOW SHOWING</span>
-            <span class="movie-symbol">${symbol}</span>
+    return `
+      <article class="movie-card">
+        <div class="movie-art ${artwork}">
+          <span class="movie-label">NOW SHOWING</span>
+          <span class="movie-symbol">${symbol}</span>
+        </div>
+        <div class="movie-info">
+          <h3>${escapeHTML(movie.title)}</h3>
+          <div class="movie-meta">
+            <span>${escapeHTML(movie.genre || "Cinema")}</span>
+            <span>${escapeHTML(movie.duration || "")}</span>
           </div>
-
-          <div class="movie-info">
-
-            <h3>${escapeHTML(movie.title)}</h3>
-
-            <div class="movie-meta">
-              <span>${escapeHTML(movie.genre || "Cinema")}</span>
-              <span>${escapeHTML(movie.duration || "")}</span>
-            </div>
-
-            <button
-              class="primary-button full-width"
-              type="button"
-              data-book-movie="${escapeHTML(movie.id)}"
-            >
-              Select Movie →
-            </button>
-
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+          <button class="primary-button full-width"
+            type="button" data-book-movie="${escapeHTML(movie.id)}">
+            Select Movie →
+          </button>
+        </div>
+      </article>
+    `;
+  }).join("");
 
   elements.movieSelect.innerHTML = `
     <option value="">Choose a movie</option>
@@ -398,29 +709,20 @@ function renderMovies() {
 
 elements.movieGrid.addEventListener("click", event => {
   const button = event.target.closest("[data-book-movie]");
-
   if (!button) return;
 
   elements.movieSelect.value = button.dataset.bookMovie;
 
-  document.querySelector("#booking").scrollIntoView({
-    behavior: "smooth"
-  });
-
+  document.querySelector("#booking").scrollIntoView({ behavior: "smooth" });
   renderSeats();
 });
 
-
-/* ---------------------------------
-   SEAT MANAGEMENT
----------------------------------- */
+/* ---------------- SEATS ---------------- */
 
 function getAllSeatIds() {
   const seats = [];
 
-  const rows = ["A", "B", "C", "D", "E"];
-
-  for (const row of rows) {
+  for (const row of ["A", "B", "C", "D", "E"]) {
     for (let number = 1; number <= 6; number++) {
       seats.push(`${row}${number}`);
     }
@@ -443,18 +745,10 @@ function getBookedSeatIds(show) {
     if (
       booking.showKey !== key ||
       booking.status === "cancelled"
-    ) {
-      continue;
-    }
+    ) continue;
 
-    // Pending payment requests also reserve seats in this demo.
-    if (
-      booking.status === "pending" ||
-      booking.status === "confirmed"
-    ) {
-      for (const seat of booking.seats || []) {
-        booked.add(seat);
-      }
+    if (["pending", "confirmed"].includes(booking.status)) {
+      for (const seat of booking.seats || []) booked.add(seat);
     }
   }
 
@@ -475,37 +769,24 @@ function getBlockedSeatIds(show) {
 
 function renderSeats() {
   const show = getSelectedShow();
-
   const seats = getAllSeatIds();
-
   const booked = getBookedSeatIds(show);
   const blocked = getBlockedSeatIds(show);
 
-  // Discard selections that are no longer available.
   for (const seat of [...selectedSeats]) {
-    if (booked.has(seat) || blocked.has(seat)) {
-      selectedSeats.delete(seat);
-    }
+    if (booked.has(seat) || blocked.has(seat)) selectedSeats.delete(seat);
   }
 
   elements.seatLayout.innerHTML = seats.map(seat => {
     const isBooked = booked.has(seat);
     const isBlocked = blocked.has(seat);
-
     const isSelected = selectedSeats.has(seat);
-
-    const disabled =
-      !show ||
-      isBooked ||
-      isBlocked;
+    const disabled = !show || isBooked || isBlocked;
 
     let className = "seat";
 
-    if (isBooked || isBlocked) {
-      className += " booked";
-    } else if (isSelected) {
-      className += " selected";
-    }
+    if (isBooked || isBlocked) className += " booked";
+    else if (isSelected) className += " selected";
 
     const title = isBooked
       ? "Already reserved"
@@ -516,15 +797,12 @@ function renderSeats() {
           : `Select seat ${seat}`;
 
     return `
-      <button
-        type="button"
-        class="${className}"
+      <button type="button" class="${className}"
         data-seat="${seat}"
-        aria-label="${title}: ${seat}"
+        aria-label="${escapeHTML(title)}: ${seat}"
         aria-pressed="${isSelected}"
-        title="${title}"
-        ${disabled ? "disabled" : ""}
-      >
+        title="${escapeHTML(title)}"
+        ${disabled ? "disabled" : ""}>
         ${seat}
       </button>
     `;
@@ -537,16 +815,13 @@ function updateBookingSummary() {
   const selected = [...selectedSeats];
 
   elements.selectedSeats.textContent =
-    selected.length
-      ? selected.join(", ")
-      : "None";
+    selected.length ? selected.join(", ") : "None";
 
   elements.totalAmount.textContent =
     formatMoney(selected.length * getBookingPrice());
 
   elements.continueBooking.disabled =
-    selected.length === 0 ||
-    !getSelectedShow();
+    selected.length === 0 || !getSelectedShow();
 
   elements.continueBooking.style.opacity =
     elements.continueBooking.disabled ? ".5" : "1";
@@ -554,23 +829,17 @@ function updateBookingSummary() {
 
 elements.seatLayout.addEventListener("click", event => {
   const button = event.target.closest("[data-seat]");
-
   if (!button || button.disabled) return;
 
-  const show = getSelectedShow();
-
-  if (!show) {
+  if (!getSelectedShow()) {
     showToast("Please select a movie, date and show.");
     return;
   }
 
   const seat = button.dataset.seat;
 
-  if (selectedSeats.has(seat)) {
-    selectedSeats.delete(seat);
-  } else {
-    selectedSeats.add(seat);
-  }
+  if (selectedSeats.has(seat)) selectedSeats.delete(seat);
+  else selectedSeats.add(seat);
 
   renderSeats();
 });
@@ -590,10 +859,7 @@ elements.showTime.addEventListener("change", () => {
   renderSeats();
 });
 
-
-/* ---------------------------------
-   PUBLIC BOOKING
----------------------------------- */
+/* ---------------- PUBLIC BOOKING ---------------- */
 
 function validateShow(show) {
   if (!show) {
@@ -614,7 +880,7 @@ function openPublicBooking() {
 
   if (!validateShow(show)) return;
 
-  if (selectedSeats.size === 0) {
+  if (!selectedSeats.size) {
     showToast("Please select at least one seat.");
     return;
   }
@@ -647,20 +913,19 @@ function openPublicBooking() {
     )}</strong>
   `;
 
+  ensurePaymentUI();
+  $("#noirPaymentPanel").hidden = true;
+
   openModal(elements.bookingModal);
 }
 
-elements.continueBooking.addEventListener(
-  "click",
-  openPublicBooking
-);
+elements.continueBooking.addEventListener("click", openPublicBooking);
 
 elements.bookingForm.addEventListener("submit", event => {
   event.preventDefault();
 
   const name = $("#customerName").value.trim();
   const phone = $("#customerPhone").value.trim();
-
   const show = getSelectedShow();
 
   if (!name || name.length > 100) {
@@ -682,26 +947,15 @@ elements.bookingForm.addEventListener("submit", event => {
     return;
   }
 
-  /*
-    Recheck availability immediately before creating the request.
-    This protects against stale data in this browser only.
-    It does NOT provide cross-device concurrency protection.
-  */
-
   const booked = getBookedSeatIds(show);
   const blocked = getBlockedSeatIds(show);
 
   for (const seat of selectedSeats) {
     if (booked.has(seat) || blocked.has(seat)) {
-      showToast(
-        `${seat} is no longer available. Please choose again.`
-      );
-
+      showToast(`${seat} is no longer available. Please choose again.`);
       selectedSeats.delete(seat);
-
       closeModal(elements.bookingModal);
       renderSeats();
-
       return;
     }
   }
@@ -711,25 +965,18 @@ elements.bookingForm.addEventListener("submit", event => {
   const booking = {
     id: generateId("BK"),
     type: "public",
-
     customerName: name,
     phone,
-
     movieId: show.movieId,
     movieTitle: getMovie(show.movieId)?.title || "",
-
     date: show.date,
     time: show.time,
     showKey: getShowKey(show),
-
     seats,
     amount: seats.length * getBookingPrice(),
-
-    paymentMethod: "upi_or_cash",
+    paymentMethod: "upi",
     paymentStatus: "unpaid",
-
     status: "pending",
-
     createdAt: new Date().toISOString()
   };
 
@@ -737,140 +984,75 @@ elements.bookingForm.addEventListener("submit", event => {
 
   if (!saveData()) {
     memory.data.bookings.pop();
-
     showToast("Could not save booking. Try again.");
     return;
   }
 
   selectedSeats.clear();
-
   elements.bookingForm.reset();
-
-  closeModal(elements.bookingModal);
 
   renderSeats();
 
-  showToast("Booking request saved on this device.");
+  showToast("Booking created. Complete payment if UPI is configured.");
 
-  showBookingDetails(booking);
+  // Keep the modal open so the customer can pay.
+  openPaymentPanel(booking);
 });
 
-
-/* ---------------------------------
-   BOOKING DETAILS
----------------------------------- */
-
 function showBookingDetails(booking) {
-  const paymentInstructions = `
-    <div class="booking-record">
-
-      <strong>Booking ID: ${escapeHTML(booking.id)}</strong>
-
-      <p>
-        Status: ${escapeHTML(booking.status.toUpperCase())}
-      </p>
-
-      <p>
-        Payment: ${escapeHTML(booking.paymentStatus)}
-      </p>
-
-      <p>
-        Amount: ${escapeHTML(formatMoney(booking.amount))}
-      </p>
-
-      <p>
-        This is a local demo reservation.
-        Payment has not been verified.
-      </p>
-
-    </div>
-  `;
-
-  elements.myBookingsList.innerHTML = paymentInstructions;
-
-  openModal(elements.myBookingsModal);
+  openPaymentPanel(booking);
 }
 
-
-/* ---------------------------------
-   MY BOOKINGS
----------------------------------- */
+/* ---------------- MY BOOKINGS ---------------- */
 
 function renderMyBookings() {
-  if (!memory.data.bookings.length &&
-      !memory.data.privateBookings.length) {
-    elements.myBookingsList.innerHTML = `
-      <p class="small-note">
-        No bookings found in this browser yet.
-      </p>
-    `;
+  const allBookings = [
+    ...memory.data.bookings.map(booking => ({ ...booking, _type: "public" })),
+    ...memory.data.privateBookings.map(booking => ({ ...booking, _type: "private" }))
+  ];
 
+  if (!allBookings.length) {
+    elements.myBookingsList.innerHTML = `
+      <p class="small-note">No bookings found in this browser yet.</p>
+    `;
     return;
   }
 
-  const publicHTML = memory.data.bookings
-    .slice()
-    .reverse()
-    .map(booking => `
-      <article class="booking-record">
+  elements.myBookingsList.innerHTML = allBookings.reverse().map(booking => {
+    const isPrivate = booking._type === "private";
 
-        <strong>${escapeHTML(booking.id)}</strong>
-
-        <p>${escapeHTML(booking.customerName)}</p>
-
-        <p>
-          ${escapeHTML(booking.movieTitle || "Movie")}
-          · ${escapeHTML(formatDate(booking.date))}
+    const details = isPrivate
+      ? `
+        <p>Private theatre · ${escapeHTML(booking.occasion)}</p>
+        <p>${escapeHTML(formatDate(booking.date))} ·
+          ${escapeHTML(booking.startTime)} ·
+          ${escapeHTML(String(booking.duration))} hours
         </p>
-
-        <p>
-          ${escapeHTML(getShowLabel(booking.time))}
-          · Seats: ${escapeHTML((booking.seats || []).join(", "))}
-        </p>
-
-        <p>
-          ${escapeHTML(formatMoney(booking.amount))}
-          · ${escapeHTML(booking.status)}
-        </p>
-
-        <p>
-          Payment: ${escapeHTML(booking.paymentStatus)}
-        </p>
-
-      </article>
-    `)
-    .join("");
-
-  const privateHTML = memory.data.privateBookings
-    .slice()
-    .reverse()
-    .map(booking => `
-      <article class="booking-record">
-
-        <strong>${escapeHTML(booking.id)}</strong>
-
-        <p>${escapeHTML(booking.customerName)}</p>
-
-        <p>
-          Private theatre · ${escapeHTML(booking.occasion)}
-        </p>
-
-        <p>
+      `
+      : `
+        <p>${escapeHTML(booking.movieTitle || "Movie")} ·
           ${escapeHTML(formatDate(booking.date))}
-          · ${escapeHTML(booking.startTime)}
-          · ${escapeHTML(String(booking.duration))} hours
         </p>
-
-        <p>
-          ${escapeHTML(booking.status)}
+        <p>${escapeHTML(getShowLabel(booking.time))} ·
+          Seats: ${escapeHTML((booking.seats || []).join(", "))}
         </p>
+        <p>${escapeHTML(formatMoney(booking.amount))}</p>
+        <button type="button" class="primary-button"
+          data-open-payment="${escapeHTML(booking.id)}">
+          View Payment / Booking
+        </button>
+      `;
 
+    return `
+      <article class="booking-record">
+        <strong>${escapeHTML(booking.id)}</strong>
+        <p>${escapeHTML(booking.customerName || "Customer")}</p>
+        ${details}
+        <p>Status: ${escapeHTML(booking.status || "pending")}</p>
+        <p>Payment: ${escapeHTML(booking.paymentStatus || "unpaid")}</p>
       </article>
-    `)
-    .join("");
-
-  elements.myBookingsList.innerHTML =
-    publicHTML + privateHTML;
+    `;
+  }).join("");
 }
 
 elements.myBookingsBtn.addEventListener("click", () => {
@@ -878,14 +1060,21 @@ elements.myBookingsBtn.addEventListener("click", () => {
   openModal(elements.myBookingsModal);
 });
 
+elements.myBookingsList.addEventListener("click", event => {
+  const button = event.target.closest("[data-open-payment]");
+  if (!button) return;
 
-/* ---------------------------------
-   PRIVATE BOOKINGS
----------------------------------- */
+  const booking = memory.data.bookings.find(
+    item => item.id === button.dataset.openPayment
+  );
+
+  if (booking) openPaymentPanel(booking);
+});
+
+/* ---------------- PRIVATE BOOKINGS ---------------- */
 
 function timeToMinutes(time) {
   const [hours, minutes] = time.split(":").map(Number);
-
   return hours * 60 + minutes;
 }
 
@@ -896,23 +1085,15 @@ function hasPrivateBookingConflict(date, startTime, duration) {
   return memory.data.privateBookings.some(booking => {
     if (
       booking.date !== date ||
-      booking.status === "cancelled" ||
-      booking.status === "rejected"
-    ) {
-      return false;
-    }
+      ["cancelled", "rejected"].includes(booking.status)
+    ) return false;
 
     const existingStart = timeToMinutes(booking.startTime);
-    const existingEnd =
-      existingStart + Number(booking.duration) * 60;
-
-    // Include a 30-minute setup/cleanup buffer.
+    const existingEnd = existingStart + Number(booking.duration) * 60;
     const buffer = 30;
 
-    return (
-      requestedStart < existingEnd + buffer &&
-      requestedEnd + buffer > existingStart
-    );
+    return requestedStart < existingEnd + buffer &&
+      requestedEnd + buffer > existingStart;
   });
 }
 
@@ -921,37 +1102,23 @@ function hasPublicShowConflict(date, startTime, duration) {
   const requestedEnd = requestedStart + duration * 60;
 
   return memory.data.bookings.some(booking => {
-    if (
-      booking.date !== date ||
-      booking.status === "cancelled"
-    ) {
-      return false;
-    }
+    if (booking.date !== date || booking.status === "cancelled") return false;
 
     const showStart = timeToMinutes(booking.time);
-
-    // Demo assumption: each public show occupies 2.5 hours.
     const showEnd = showStart + 150;
-
     const buffer = 30;
 
-    return (
-      requestedStart < showEnd + buffer &&
-      requestedEnd + buffer > showStart
-    );
+    return requestedStart < showEnd + buffer &&
+      requestedEnd + buffer > showStart;
   });
 }
 
 function openPrivateBooking() {
   setMinimumDate($("#privateDate"));
-
   openModal(elements.privateModal);
 }
 
-elements.privateBookingBtn.addEventListener(
-  "click",
-  openPrivateBooking
-);
+elements.privateBookingBtn.addEventListener("click", openPrivateBooking);
 
 elements.privateForm.addEventListener("submit", event => {
   event.preventDefault();
@@ -959,7 +1126,6 @@ elements.privateForm.addEventListener("submit", event => {
   const customerName = $("#privateName").value.trim();
   const phone = $("#privatePhone").value.trim();
   const occasion = $("#privateOccasion").value;
-
   const date = $("#privateDate").value;
   const startTime = $("#privateTime").value;
   const duration = Number($("#privateDuration").value);
@@ -989,50 +1155,35 @@ elements.privateForm.addEventListener("submit", event => {
     return;
   }
 
-  const start = timeToMinutes(startTime);
-  const end = start + duration * 60;
+  const end = timeToMinutes(startTime) + duration * 60;
 
-  // Do not allow private reservations past midnight.
   if (end > 24 * 60) {
     showToast("Choose an earlier starting time.");
     return;
   }
 
   if (hasPrivateBookingConflict(date, startTime, duration)) {
-    showToast(
-      "This time overlaps another private reservation."
-    );
-
+    showToast("This time overlaps another private reservation.");
     return;
   }
 
   if (hasPublicShowConflict(date, startTime, duration)) {
-    showToast(
-      "This time conflicts with a public show reservation."
-    );
-
+    showToast("This time conflicts with a public show reservation.");
     return;
   }
 
   const reservation = {
     id: generateId("PR"),
-
     type: "private",
-
     customerName,
     phone,
     occasion,
-
     date,
     startTime,
     duration,
-
     amount: null,
-
     paymentStatus: "unpaid",
-
     status: "pending",
-
     createdAt: new Date().toISOString()
   };
 
@@ -1040,26 +1191,19 @@ elements.privateForm.addEventListener("submit", event => {
 
   if (!saveData()) {
     memory.data.privateBookings.pop();
-
     showToast("Could not save request. Try again.");
     return;
   }
 
   elements.privateForm.reset();
-
   closeModal(elements.privateModal);
 
   showToast("Private booking request saved.");
-
   renderMyBookings();
-
   openModal(elements.myBookingsModal);
 });
 
-
-/* ---------------------------------
-   MODAL CONTROLS
----------------------------------- */
+/* ---------------- MODALS ---------------- */
 
 $("#closeBookingModal").addEventListener("click", () => {
   closeModal(elements.bookingModal);
@@ -1075,9 +1219,7 @@ $("#closePrivateModal").addEventListener("click", () => {
 
 document.querySelectorAll(".modal-overlay").forEach(modal => {
   modal.addEventListener("click", event => {
-    if (event.target === modal) {
-      closeModal(modal);
-    }
+    if (event.target === modal) closeModal(modal);
   });
 });
 
@@ -1085,36 +1227,27 @@ document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
 
   document.querySelectorAll(".modal-overlay").forEach(modal => {
-    if (!modal.hidden) {
-      closeModal(modal);
-    }
+    if (!modal.hidden) closeModal(modal);
   });
 });
 
-
-/* ---------------------------------
-   INITIALIZATION
----------------------------------- */
+/* ---------------- INITIALIZE ---------------- */
 
 function initialize() {
   loadData();
+  ensurePaymentUI();
 
-  elements.currentYear.textContent =
-    new Date().getFullYear();
+  elements.currentYear.textContent = new Date().getFullYear();
 
   setMinimumDate(elements.showDate);
   setMinimumDate($("#privateDate"));
 
-  // Default date: today.
   elements.showDate.value = todayString();
 
   renderMovies();
   renderSeats();
 
-  console.info(
-    "NOIR Cinema Club initialized.",
-    `${CONFIG.seatCount} seats configured.`
-  );
+  console.info("NOIR Cinema Club initialized with 30 seats.");
 }
 
 initialize();
