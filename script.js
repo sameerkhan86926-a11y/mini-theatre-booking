@@ -2,7 +2,7 @@
 
 /*
   NOIR MINI THEATRE
-  Frontend demo with UPI payment interface.
+  Frontend demo with UPI payment interface and ticket confirmation.
 
   IMPORTANT:
   - localStorage is browser-specific.
@@ -172,6 +172,67 @@ function saveData() {
   }
 }
 
+/*
+  Refresh the in-memory data from localStorage.
+
+  This lets the customer page see admin changes when both pages
+  use the same browser, origin and localStorage.
+*/
+function refreshDataFromStorage() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+
+    if (!saved) return false;
+
+    const parsed = JSON.parse(saved);
+
+    if (
+      !parsed ||
+      !Array.isArray(parsed.movies) ||
+      !Array.isArray(parsed.bookings) ||
+      !Array.isArray(parsed.privateBookings)
+    ) {
+      return false;
+    }
+
+    memory.data = parsed;
+
+    if (!memory.data.settings) {
+      memory.data.settings = createInitialData().settings;
+    }
+
+    if (!Array.isArray(memory.data.blockedSeats)) {
+      memory.data.blockedSeats = [];
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Unable to refresh booking data:", error);
+    return false;
+  }
+}
+
+/* Update this page if another page in the same browser changes storage. */
+window.addEventListener("storage", event => {
+  if (event.key !== STORAGE_KEY || !event.newValue) return;
+
+  if (!refreshDataFromStorage()) return;
+
+  renderMovies();
+  renderSeats();
+  renderMyBookings();
+
+  if (activePaymentBookingId) {
+    const booking = memory.data.bookings.find(
+      item => item.id === activePaymentBookingId
+    );
+
+    if (booking) {
+      updatePaymentPanel(booking);
+    }
+  }
+});
+
 /* ---------------- HELPERS ---------------- */
 
 function escapeHTML(value) {
@@ -290,6 +351,12 @@ function getBookingPrice() {
 
 function getReceivingUpiId() {
   return String(memory.data.settings.upiId || "").trim();
+}
+
+function isBookingVerified(booking) {
+  return booking.paymentStatus === "verified" &&
+    booking.status === "confirmed" &&
+    booking.type !== "private";
 }
 
 /* ---------------- PAYMENT UI ---------------- */
@@ -423,9 +490,112 @@ function ensurePaymentUI() {
       font-size:12px;
     }
 
+    #noirPaymentPanel .confirmed-ticket {
+      margin-top:18px;
+      padding:20px;
+      border:1px solid #6cba8b;
+      border-radius:16px;
+      background:linear-gradient(145deg,#10251c,#11121a);
+      color:#f5fff8;
+    }
+
+    #noirPaymentPanel .ticket-heading {
+      text-align:center;
+      padding-bottom:16px;
+      border-bottom:1px dashed #6cba8b;
+    }
+
+    #noirPaymentPanel .ticket-check {
+      display:inline-flex;
+      width:48px;
+      height:48px;
+      align-items:center;
+      justify-content:center;
+      border-radius:50%;
+      background:#245c3b;
+      color:#a6ffc4;
+      font-size:25px;
+      margin-bottom:10px;
+    }
+
+    #noirPaymentPanel .ticket-heading h3 {
+      color:#a6ffc4;
+      margin:0 0 6px;
+    }
+
+    #noirPaymentPanel .ticket-grid {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:16px 10px;
+      margin:20px 0;
+    }
+
+    #noirPaymentPanel .ticket-item small {
+      display:block;
+      color:#b6c8bc;
+      margin-bottom:5px;
+    }
+
+    #noirPaymentPanel .ticket-item strong {
+      display:block;
+      overflow-wrap:anywhere;
+      font-size:14px;
+    }
+
+    #noirPaymentPanel .ticket-full {
+      grid-column:1 / -1;
+    }
+
+    #noirPaymentPanel .ticket-confirmed {
+      color:#a6ffc4;
+    }
+
+    #noirPaymentPanel .ticket-print {
+      width:100%;
+      margin-top:10px;
+      padding:12px;
+      border:0;
+      border-radius:9px;
+      background:#a6ffc4;
+      color:#10251c;
+      font-weight:800;
+      cursor:pointer;
+    }
+
     @media(min-width:560px) {
       #noirPaymentPanel .payment-actions.two {
         grid-template-columns:1fr 1fr;
+      }
+    }
+
+    @media print {
+      body * {
+        visibility:hidden !important;
+      }
+
+      #noirPaymentPanel .confirmed-ticket,
+      #noirPaymentPanel .confirmed-ticket * {
+        visibility:visible !important;
+      }
+
+      #noirPaymentPanel .confirmed-ticket {
+        position:absolute;
+        left:0;
+        top:0;
+        width:100%;
+        box-sizing:border-box;
+        background:white !important;
+        color:black !important;
+        border:2px solid #333 !important;
+      }
+
+      #noirPaymentPanel .confirmed-ticket p,
+      #noirPaymentPanel .confirmed-ticket small {
+        color:#333 !important;
+      }
+
+      #noirPaymentPanel .ticket-print {
+        display:none !important;
       }
     }
   `;
@@ -439,6 +609,7 @@ function ensurePaymentUI() {
 
   panel.innerHTML = `
     <h3>Complete your payment</h3>
+
     <p>Booking ID: <strong id="paymentBookingId"></strong></p>
 
     <div class="payment-amount" id="paymentAmount">₹0</div>
@@ -487,7 +658,70 @@ function ensurePaymentUI() {
       </form>
     </div>
 
-    <p class="payment-warning">
+    <section id="confirmedTicket" class="confirmed-ticket" hidden>
+      <div class="ticket-heading">
+        <div class="ticket-check">✓</div>
+        <h3>Booking Confirmed!</h3>
+        <p>Your cinema ticket is ready.</p>
+
+        <span class="payment-status ticket-confirmed">
+          PAYMENT VERIFIED
+        </span>
+      </div>
+
+      <div class="ticket-grid">
+        <div class="ticket-item ticket-full">
+          <small>BOOKING ID</small>
+          <strong id="ticketBookingId">—</strong>
+        </div>
+
+        <div class="ticket-item ticket-full">
+          <small>MOVIE</small>
+          <strong id="ticketMovie">—</strong>
+        </div>
+
+        <div class="ticket-item">
+          <small>SHOW DATE</small>
+          <strong id="ticketDate">—</strong>
+        </div>
+
+        <div class="ticket-item">
+          <small>SHOW TIME</small>
+          <strong id="ticketTime">—</strong>
+        </div>
+
+        <div class="ticket-item ticket-full">
+          <small>SEATS</small>
+          <strong id="ticketSeats">—</strong>
+        </div>
+
+        <div class="ticket-item">
+          <small>CUSTOMER</small>
+          <strong id="ticketCustomer">—</strong>
+        </div>
+
+        <div class="ticket-item">
+          <small>MOBILE</small>
+          <strong id="ticketPhone">—</strong>
+        </div>
+
+        <div class="ticket-item">
+          <small>TOTAL PAID</small>
+          <strong id="ticketAmount">—</strong>
+        </div>
+
+        <div class="ticket-item">
+          <small>BOOKING STATUS</small>
+          <strong class="ticket-confirmed">CONFIRMED</strong>
+        </div>
+      </div>
+
+      <button type="button" class="ticket-print" id="printTicket">
+        Print / Save Ticket as PDF
+      </button>
+    </section>
+
+    <p class="payment-warning" id="paymentWarning">
       Important: Submitting a UTR does not verify payment. Your booking remains
       pending until the theatre verifies the payment. Never pay an ID you have
       not checked.
@@ -505,6 +739,22 @@ function ensurePaymentUI() {
 
   $("#copyUpiDetails").addEventListener("click", copyPaymentDetails);
   $("#utrForm").addEventListener("submit", submitUtr);
+
+  $("#printTicket").addEventListener("click", () => {
+    refreshDataFromStorage();
+
+    const booking = memory.data.bookings.find(
+      item => item.id === activePaymentBookingId
+    );
+
+    if (!booking || !isBookingVerified(booking)) {
+      showToast("Confirmed ticket is not available yet.");
+      return;
+    }
+
+    updatePaymentPanel(booking);
+    window.print();
+  });
 }
 
 function makeUpiIntent(booking) {
@@ -535,30 +785,88 @@ function makeQrUrl(booking) {
     }).toString();
 }
 
-function openPaymentPanel(booking) {
-  ensurePaymentUI();
+/* ---------------- CONFIRMED TICKET ---------------- */
 
+function renderConfirmedTicket(booking) {
+  const ticket = $("#confirmedTicket");
+
+  if (!ticket) return;
+
+  const verified = isBookingVerified(booking);
+
+  ticket.hidden = !verified;
+
+  if (!verified) return;
+
+  $("#ticketBookingId").textContent = booking.id;
+
+  $("#ticketMovie").textContent =
+    booking.movieTitle ||
+    getMovie(booking.movieId)?.title ||
+    "Movie";
+
+  $("#ticketDate").textContent = formatDate(booking.date);
+  $("#ticketTime").textContent = getShowLabel(booking.time);
+
+  $("#ticketSeats").textContent =
+    Array.isArray(booking.seats) && booking.seats.length
+      ? booking.seats.join(", ")
+      : "Not available";
+
+  $("#ticketCustomer").textContent =
+    booking.customerName || "Customer";
+
+  $("#ticketPhone").textContent =
+    booking.phone || "Not available";
+
+  $("#ticketAmount").textContent = formatMoney(booking.amount);
+
+  const warning = $("#paymentWarning");
+
+  if (warning) warning.hidden = true;
+}
+
+/* ---------------- UPDATE PAYMENT PANEL ---------------- */
+
+function updatePaymentPanel(booking) {
   const panel = $("#noirPaymentPanel");
 
-  if (!panel) {
-    showToast("Payment panel could not be loaded. Please refresh.");
-    return;
-  }
+  if (!panel || !booking) return;
 
   activePaymentBookingId = booking.id;
 
   $("#paymentBookingId").textContent = booking.id;
   $("#paymentAmount").textContent = formatMoney(booking.amount);
 
+  const verified = isBookingVerified(booking);
+
   $("#paymentStatusLabel").textContent =
-    booking.paymentStatus === "verification_pending"
-      ? "Reference submitted · Verification pending"
-      : booking.paymentStatus === "verified"
-        ? "Payment verified"
-        : "Payment pending";
+    verified
+      ? "Payment verified · Booking confirmed"
+      : booking.paymentStatus === "verification_pending"
+        ? "Reference submitted · Verification pending"
+        : booking.status === "cancelled"
+          ? "Booking cancelled"
+          : "Payment pending";
 
   $("#utrInput").value = booking.utr || "";
   $("#utrMessage").textContent = "";
+
+  const alreadySubmitted =
+    booking.paymentStatus === "verification_pending" ||
+    booking.paymentStatus === "verified";
+
+  $("#utrForm").hidden = alreadySubmitted || verified;
+
+  $("#paymentInstructions").hidden = verified;
+
+  $("#paymentWarning").hidden = verified;
+
+  renderConfirmedTicket(booking);
+
+  if (verified) {
+    return;
+  }
 
   const upiId = getReceivingUpiId();
   const intent = makeUpiIntent(booking);
@@ -596,27 +904,25 @@ function openPaymentPanel(booking) {
     $("#payViaUpi").style.display = "none";
     $("#copyUpiDetails").disabled = true;
   }
+}
 
-  const alreadySubmitted =
-    booking.paymentStatus === "verification_pending" ||
-    booking.paymentStatus === "verified";
+function openPaymentPanel(booking) {
+  ensurePaymentUI();
 
-  $("#utrForm").hidden = alreadySubmitted;
+  const panel = $("#noirPaymentPanel");
 
-  $("#paymentInstructions").hidden =
-    booking.paymentStatus === "verified";
+  if (!panel) {
+    showToast("Payment panel could not be loaded. Please refresh.");
+    return;
+  }
 
-  /*
-    FIX:
-    Always make the booking modal visible before showing its payment panel.
-    This is needed when the customer opens payment from My Bookings.
-  */
+  updatePaymentPanel(booking);
+
   closeModal(elements.myBookingsModal);
   openModal(elements.bookingModal);
 
   panel.hidden = false;
 
-  // Scroll the booking modal to the payment panel.
   setTimeout(() => {
     panel.scrollIntoView({
       behavior: "smooth",
@@ -626,6 +932,8 @@ function openPaymentPanel(booking) {
 }
 
 async function copyPaymentDetails() {
+  refreshDataFromStorage();
+
   const booking = memory.data.bookings.find(
     item => item.id === activePaymentBookingId
   );
@@ -660,6 +968,8 @@ function submitUtr(event) {
     return;
   }
 
+  refreshDataFromStorage();
+
   const booking = memory.data.bookings.find(
     item => item.id === activePaymentBookingId
   );
@@ -672,6 +982,13 @@ function submitUtr(event) {
   if (booking.status === "cancelled") {
     $("#utrMessage").textContent =
       "This booking was cancelled. Contact the theatre.";
+    return;
+  }
+
+  if (isBookingVerified(booking)) {
+    $("#utrMessage").textContent =
+      "Payment has already been verified.";
+    updatePaymentPanel(booking);
     return;
   }
 
@@ -702,10 +1019,7 @@ function submitUtr(event) {
     return;
   }
 
-  $("#paymentStatusLabel").textContent =
-    "Reference submitted · Verification pending";
-
-  $("#utrForm").hidden = true;
+  updatePaymentPanel(booking);
 
   $("#utrMessage").textContent =
     "Reference saved on this device. Payment is not yet verified.";
@@ -718,6 +1032,8 @@ function submitUtr(event) {
 /* ---------------- MOVIES ---------------- */
 
 function renderMovies() {
+  if (!elements.movieGrid || !elements.movieSelect) return;
+
   elements.movieGrid.innerHTML = memory.data.movies.map((movie, index) => {
     const artwork = ["art-one", "art-two", "art-three"][index % 3];
     const symbol = ["✦", "♡", "✧"][index % 3];
@@ -825,6 +1141,8 @@ function getBlockedSeatIds(show) {
 }
 
 function renderSeats() {
+  if (!elements.seatLayout) return;
+
   const show = getSelectedShow();
   const seats = getAllSeatIds();
   const booked = getBookedSeatIds(show);
@@ -874,6 +1192,8 @@ function renderSeats() {
 }
 
 function updateBookingSummary() {
+  if (!elements.selectedSeats || !elements.totalAmount) return;
+
   const selected = [...selectedSeats];
 
   elements.selectedSeats.textContent =
@@ -1070,13 +1390,11 @@ elements.bookingForm.addEventListener("submit", event => {
   openPaymentPanel(booking);
 });
 
-function showBookingDetails(booking) {
-  openPaymentPanel(booking);
-}
-
 /* ---------------- MY BOOKINGS ---------------- */
 
 function renderMyBookings() {
+  if (!elements.myBookingsList) return;
+
   const allBookings = [
     ...memory.data.bookings.map(booking => ({
       ...booking,
@@ -1099,6 +1417,7 @@ function renderMyBookings() {
 
   elements.myBookingsList.innerHTML = allBookings.reverse().map(booking => {
     const isPrivate = booking._type === "private";
+    const verified = isBookingVerified(booking);
 
     const details = isPrivate
       ? `
@@ -1127,7 +1446,7 @@ function renderMyBookings() {
           type="button"
           class="primary-button"
           data-open-payment="${escapeHTML(booking.id)}">
-          View Payment / Booking
+          ${verified ? "View Confirmed Ticket" : "View Payment / Booking"}
         </button>
       `;
 
@@ -1139,32 +1458,38 @@ function renderMyBookings() {
 
         ${details}
 
-        <p>Status: ${escapeHTML(booking.status || "pending")}</p>
+        <p>
+          Status:
+          <strong>${escapeHTML(String(booking.status || "pending").toUpperCase())}</strong>
+        </p>
 
-        <p>Payment: ${escapeHTML(booking.paymentStatus || "unpaid")}</p>
+        <p>
+          Payment:
+          <strong>${escapeHTML(String(booking.paymentStatus || "unpaid").toUpperCase())}</strong>
+        </p>
+
+        ${verified ? `
+          <p style="color:#23834b;font-weight:700">
+            Your ticket is confirmed.
+          </p>
+        ` : ""}
       </article>
     `;
   }).join("");
 }
 
 elements.myBookingsBtn.addEventListener("click", () => {
+  refreshDataFromStorage();
   renderMyBookings();
   openModal(elements.myBookingsModal);
 });
-
-/*
-  FIXED VIEW PAYMENT BUTTON
-
-  1. Find the selected booking.
-  2. Close the My Bookings modal.
-  3. Open the Booking modal.
-  4. Display the payment panel for the selected booking.
-*/
 
 elements.myBookingsList.addEventListener("click", event => {
   const button = event.target.closest("[data-open-payment]");
 
   if (!button) return;
+
+  refreshDataFromStorage();
 
   const bookingId = button.dataset.openPayment;
 
@@ -1178,7 +1503,6 @@ elements.myBookingsList.addEventListener("click", event => {
   }
 
   closeModal(elements.myBookingsModal);
-
   openModal(elements.bookingModal);
 
   openPaymentPanel(booking);
@@ -1373,7 +1697,9 @@ function initialize() {
   setMinimumDate(elements.showDate);
   setMinimumDate($("#privateDate"));
 
-  elements.showDate.value = todayString();
+  if (elements.showDate) {
+    elements.showDate.value = todayString();
+  }
 
   renderMovies();
   renderSeats();
