@@ -1007,3 +1007,154 @@ input::placeholder {
     transition-duration: .01ms !important;
   }
 }
+/* ===== NOIR CONFIRMED TICKET ===== */
+
+#noirPaymentPanel .confirmed-ticket {
+  margin-top: 20px;
+  padding: 22px;
+  border: 1px solid #6cba8b;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #10251c, #11121a);
+  color: #f5fff8;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.25);
+}
+
+#noirPaymentPanel .ticket-heading {
+  text-align: center;
+  padding-bottom: 18px;
+  border-bottom: 1px dashed #6cba8b;
+}
+
+#noirPaymentPanel .ticket-check {
+  display: inline-flex;
+  width: 52px;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #245c3b;
+  color: #a6ffc4;
+  font-size: 28px;
+  margin-bottom: 12px;
+}
+
+#noirPaymentPanel .ticket-heading h3 {
+  color: #a6ffc4;
+  margin: 0 0 8px;
+  font-size: 23px;
+}
+
+#noirPaymentPanel .ticket-heading p {
+  color: #c2d8c9;
+}
+
+#noirPaymentPanel .ticket-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 12px;
+  margin: 24px 0;
+}
+
+#noirPaymentPanel .ticket-item {
+  min-width: 0;
+}
+
+#noirPaymentPanel .ticket-full {
+  grid-column: 1 / -1;
+}
+
+#noirPaymentPanel .ticket-item small {
+  display: block;
+  color: #a9bfb0;
+  font-size: 11px;
+  letter-spacing: 1px;
+  margin-bottom: 7px;
+}
+
+#noirPaymentPanel .ticket-item strong {
+  display: block;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#noirPaymentPanel .ticket-confirmed {
+  color: #a6ffc4 !important;
+}
+
+#noirPaymentPanel .ticket-print {
+  width: 100%;
+  min-height: 48px;
+  padding: 13px;
+  border: none;
+  border-radius: 10px;
+  background: #a6ffc4;
+  color: #10251c;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+#noirPaymentPanel .ticket-print:hover {
+  transform: translateY(-2px);
+  opacity: 0.92;
+}
+
+#noirPaymentPanel .ticket-print:active {
+  transform: scale(0.98);
+}
+
+/* Mobile layout */
+@media (max-width: 380px) {
+  #noirPaymentPanel .confirmed-ticket {
+    padding: 16px;
+  }
+
+  #noirPaymentPanel .ticket-grid {
+    gap: 16px 8px;
+  }
+
+  #noirPaymentPanel .ticket-item strong {
+    font-size: 12px;
+  }
+}
+
+/* Print / Save as PDF */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  #noirPaymentPanel .confirmed-ticket,
+  #noirPaymentPanel .confirmed-ticket * {
+    visibility: visible !important;
+  }
+
+  #noirPaymentPanel .confirmed-ticket {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    background: #ffffff !important;
+    color: #111111 !important;
+    border: 2px solid #333333 !important;
+    box-shadow: none !important;
+  }
+
+  #noirPaymentPanel .ticket-heading h3,
+  #noirPaymentPanel .ticket-item strong {
+    color: #111111 !important;
+  }
+
+  #noirPaymentPanel .ticket-heading p,
+  #noirPaymentPanel .ticket-item small {
+    color: #444444 !important;
+  }
+
+  #noirPaymentPanel .ticket-print {
+    display: none !important;
+  }
+}
