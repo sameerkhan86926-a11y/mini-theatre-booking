@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#09090d">
+  <title>NOIR | Admin Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+
+  <style>
+    body { background:#09090d; color:#f5f5f5; }
+    .admin-wrap { max-width:1200px; margin:auto; padding:30px 18px 70px; }
+    .admin-top { display:flex; justify-content:space-between; align-items:center; gap:15px; flex-wrap:wrap; margin-bottom:30px; }
+    .admin-top h1 { margin:0; font-size:clamp(26px,5vw,38px); }
+    .admin-top p { color:#aaa; margin:8px 0 0; }
+    .admin-btn { border:1px solid #444; padding:11px 16px; border-radius:10px; color:#fff; background:#19191f; cursor:pointer; text-decoration:none; display:inline-block; }
+    .admin-btn:hover { background:#292932; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:30px; }
+    .stat-card,.admin-panel { border:1px solid #292932; background:#121218; border-radius:16px; padding:20px; }
+    .stat-card span { color:#aaa; font-size:13px; }
+    .stat-card strong { display:block; font-size:27px; margin-top:10px; overflow-wrap:anywhere; }
+    .admin-panel { margin-bottom:22px; }
+    .admin-panel h2 { font-size:20px; margin:0 0 18px; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; min-width:680px; }
+    th,td { text-align:left; padding:13px 11px; border-bottom:1px solid #292932; font-size:13px; vertical-align:top; }
+    th { color:#aaa; font-weight:600; }
+    td { color:#eee; }
+    .action-row { display:flex; gap:7px; flex-wrap:wrap; }
+    .action-btn { border:0; border-radius:7px; padding:8px 10px; cursor:pointer; color:white; font-size:12px; }
+    .approve { background:#176b45; }
+    .reject { background:#8d3038; }
+    .neutral { background:#33333e; }
+    .status { display:inline-block; padding:5px 8px; border-radius:6px; background:#292932; font-size:11px; }
+    .status.confirmed { color:#7ef0b2; }
+    .status.pending { color:#ffd479; }
+    .status.cancelled { color:#ff9292; }
+    .settings-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px; }
+    .admin-field label { display:block; color:#bbb; margin-bottom:8px; font-size:13px; }
+    .admin-field input { width:100%; box-sizing:border-box; padding:13px; border:1px solid #363641; border-radius:9px; background:#09090d; color:#fff; }
+    .settings-actions { margin-top:18px; }
+    .empty { color:#999; padding:18px 0; }
+    .warning { border:1px solid #665020; background:#241d0e; color:#ffe0a0; border-radius:12px; padding:14px; margin-bottom:22px; line-height:1.6; font-size:13px; }
+    #adminApp[hidden],#loginBox[hidden] { display:none; }
+    #loginBox { max-width:400px; margin:70px auto; padding:25px; border:1px solid #292932; border-radius:16px; background:#121218; }
+    #loginBox input { box-sizing:border-box; width:100%; padding:13px; margin:12px 0; background:#09090d; color:white; border:1px solid #444; border-radius:8px; }
+    #loginError { color:#ff9292; font-size:13px; }
+    @media(max-width:760px) { .stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .settings-grid { grid-template-columns:1fr; } .admin-wrap { padding:20px 12px 50px; } }
+  </style>
+</head>
+<body>
+  <main class="admin-wrap">
+    <section id="loginBox">
+      <h1>NOIR Admin</h1>
+      <p>Enter your demo admin PIN to continue.</p>
+      <form id="loginForm">
+        <input id="adminPin" type="password" placeholder="Demo PIN" required autocomplete="current-password">
+        <button class="admin-btn" type="submit">Open Dashboard</button>
+        <p id="loginError"></p>
+      </form>
+      <p style="color:#999;font-size:12px;line-height:1.6">
+        Demo PIN: <strong>2468</strong>. This is only a prototype gate, not secure authentication.
+      </p>
+    </section>
+
+    <section id="adminApp" hidden>
+      <header class="admin-top">
+        <div>
+          <h1>NOIR <span style="color:#c9a76a">Admin</span></h1>
+          <p>Mini Theatre · Booking Management</p>
+        </div>
+        <div class="action-row">
+          <a href="index.html" class="admin-btn">View Website ↗</a>
+          <button class="admin-btn" id="refreshBtn">Refresh</button>
+          <button class="admin-btn" id="logoutBtn">Lock Panel</button>
+        </div>
+      </header>
+
+      <div class="warning">
+        ⚠️ <strong>Prototype notice:</strong> bookings are stored in this browser's localStorage.
+        This dashboard is not connected to a shared database, so customer bookings made on other
+        devices will not appear here. The demo PIN is not security for a publicly deployed website.
+      </div>
+
+      <section class="stats">
+        <div class="stat-card"><span>Total public bookings</span><strong id="totalBookings">0</strong></div>
+        <div class="stat-card"><span>Pending requests</span><strong id="pendingBookings">0</strong></div>
+        <div class="stat-card"><span>Confirmed bookings</span><strong id="confirmedBookings">0</strong></div>
+        <div class="stat-card"><span>Verified payments</span><strong id="verifiedRevenue">₹0</strong></div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>🎟️ Public Seat Bookings</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th><th>Show</th><th>Seats</th><th>Amount</th>
+                <th>Status</th><th>Payment</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bookingRows"></tbody>
+          </table>
+        </div>
+        <p id="noBookings" class="empty" hidden>No public bookings found yet.</p>
+      </section>
+
+      <section class="admin-panel">
+        <h2>🎉 Private Theatre Requests</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th><th>Occasion</th><th>Date</th><th>Time</th>
+                <th>Duration</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="privateRows"></tbody>
+          </table>
+        </div>
+        <p id="noPrivate" class="empty" hidden>No private booking requests found yet.</p>
+      </section>
+
+      <section class="admin-panel">
+        <h2>⚙️ Theatre Settings</h2>
+        <form id="settingsForm">
+          <div class="settings-grid">
+            <div class="admin-field">
+              <label for="ticketPrice">Ticket price (₹ per seat)</label>
+              <input id="ticketPrice" type="number" min="1" step="1" required>
+            </div>
+            <div class="admin-field">
+              <label for="upiId">Your receiving UPI ID</label>
+              <input id="upiId" type="text" placeholder="yourname@bank" autocomplete="off">
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="admin-btn" type="submit">Save Settings</button>
+          </div>
+          <p id="settingsMessage" style="color:#7ef0b2" aria-live="polite"></p>
+        </form>
+      </section>
+    </section>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>
